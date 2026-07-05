@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Hero Energy — Bank CSV Formatter</title>
+<meta name="robots" content="noindex, nofollow">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <style>
   :root{
@@ -161,16 +162,49 @@
     width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
     background:var(--dark);color:var(--honey);border:none;border-radius:8px;padding:12px;
   }
+  #lockScreen{
+    position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;
+    background:var(--dark);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .lock-box{
+    background:var(--white);border-radius:14px;padding:36px 32px;
+    width:100%;max-width:340px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4);
+  }
+  .lock-box .logo-dot{margin:0 auto 14px;}
+  .lock-box h2{margin:0 0 6px;font-size:17px;}
+  .lock-box p{color:#7a6a52;font-size:13px;margin:0 0 18px;}
+  .lock-box input{width:100%;text-align:center;font-size:15px;margin-bottom:12px;letter-spacing:2px;}
+  .lock-box button{width:100%;}
+  .lock-error{color:var(--danger);font-size:12.5px;margin-top:10px;min-height:16px;}
+  .open-sheet-row{display:flex;justify-content:flex-end;margin-bottom:10px;}
 </style>
 </head>
 <body>
-<div class="wrap">
+
+<div id="lockScreen">
+  <div class="lock-box">
+    <div class="logo-dot"></div>
+    <h2>Hero Energy Bookkeeping</h2>
+    <p>Enter the password to continue</p>
+    <input type="password" id="lockPassword" placeholder="Password" autocomplete="off">
+    <button id="lockSubmit">Unlock</button>
+    <div class="lock-error" id="lockError"></div>
+  </div>
+</div>
+
+<div class="wrap" id="mainContent" style="display:none;">
 
   <header>
     <div class="logo-dot"></div>
     <h1>Bank CSV → Bookkeeping Formatter</h1>
   </header>
   <div class="subtitle">Turn one or more bank CSV exports into rows ready to paste straight into the Income and Expenses tabs of your Hero Energy bookkeeping sheet.</div>
+  <div class="open-sheet-row">
+    <a href="https://docs.google.com/spreadsheets/d/1b4P3ZSzotTD4vZw6gG675Ka1YC__ePbWKVxxfZpdOC0/edit?usp=sharing" target="_blank" rel="noopener">
+      <button class="secondary" type="button">Open Google Sheet ↗</button>
+    </a>
+  </div>
 
   <!-- STEP 1: Upload -->
   <div class="step" data-done="0" id="step1">
@@ -376,6 +410,28 @@ let incomeRows = [];
 let expenseRows = [];
 
 const $ = (id) => document.getElementById(id);
+
+// ---------- Simple password gate ----------
+// Note: this only deters casual visitors — it's plain JS, visible in the page
+// source, so it isn't real security. The Apps Script Web App URL is the actual
+// sensitive thing; consider a server-side shared-secret check there too.
+const SITE_PASSWORD = "H#r0";
+
+function tryUnlock(){
+  const entered = $("lockPassword").value;
+  if(entered === SITE_PASSWORD){
+    $("lockScreen").style.display = "none";
+    $("mainContent").style.display = "";
+  } else {
+    $("lockError").textContent = "Incorrect password — try again.";
+    $("lockPassword").value = "";
+    $("lockPassword").focus();
+  }
+}
+$("lockSubmit").addEventListener("click", tryUnlock);
+$("lockPassword").addEventListener("keydown", (e)=>{ if(e.key === "Enter") tryUnlock(); });
+$("lockPassword").focus();
+
 
 function showToast(msg){
   const t = $("toast");
@@ -845,9 +901,12 @@ const APPS_SCRIPT_CODE = `function doPost(e) {
     var rows = body.rows;         // array of arrays, in column order
     var startRow = 5;             // first data row in both tabs
 
+    console.log("doPost received sheet=" + sheetName + " rowCount=" + (rows ? rows.length : "undefined"));
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
+      console.log("ERROR: sheet not found. Available sheets: " + ss.getSheets().map(function(s){return s.getName();}).join(", "));
       return ContentService.createTextOutput(JSON.stringify({ok:false, error:"Sheet not found: " + sheetName}))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -855,6 +914,7 @@ const APPS_SCRIPT_CODE = `function doPost(e) {
       var lastRow = sheet.getLastRow();
       var targetRow = Math.max(startRow, lastRow + 1);
       var numCols = rows[0].length;
+      console.log("Writing " + rows.length + " rows to '" + sheetName + "' starting at row " + targetRow);
       sheet.getRange(targetRow, 1, rows.length, numCols).setValues(rows);
 
       // Re-sort by date (column A), since script-driven edits don't trigger onEdit
@@ -863,10 +923,13 @@ const APPS_SCRIPT_CODE = `function doPost(e) {
         sheet.getRange(startRow, 1, finalLastRow - startRow + 1, sheet.getLastColumn())
              .sort({column: 1, ascending: true});
       }
+    } else {
+      console.log("No rows in payload — nothing written.");
     }
     return ContentService.createTextOutput(JSON.stringify({ok:true, added: rows.length}))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
+    console.log("EXCEPTION: " + err.message);
     return ContentService.createTextOutput(JSON.stringify({ok:false, error: err.message}))
       .setMimeType(ContentService.MimeType.JSON);
   }
