@@ -152,16 +152,6 @@
   .summary-row:last-child{border-bottom:none;}
   .step-body.collapsed + .step-head, .step[data-done="1"] .step-head{background:#FCF6E8;}
   input[type=checkbox]{width:16px;height:16px;accent-color:var(--amber);}
-  .gs-setup{
-    border:1px solid var(--border);border-radius:10px;background:var(--grey);
-    padding:12px 16px;margin-bottom:20px;
-  }
-  .gs-setup summary{cursor:pointer;font-weight:700;font-size:13.5px;}
-  .gs-setup-body{margin-top:14px;}
-  .gs-setup textarea{
-    width:100%;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
-    background:var(--dark);color:var(--honey);border:none;border-radius:8px;padding:12px;
-  }
   #lockScreen{
     position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;
     background:var(--dark);
@@ -306,35 +296,11 @@
 
       <div class="summary-box" id="fileSummaryBox"></div>
 
-      <p class="hint">We've guessed a category for each line from the description, and tagged each row with its Bank / Platform. Untick anything you don't want copied (transfers between your own accounts, credit card payments, etc.), fix any category or platform label, then either copy each block into the matching tab, or send it straight to your sheet (setup below).</p>
-
-      <details class="gs-setup">
-        <summary>⚙️ Set up "Send to Google Sheet" (one-time)</summary>
-        <div class="gs-setup-body">
-          <p class="hint" style="margin-bottom:10px;">
-            1. Open your <strong>Hero_Energy_Bookkeeping_Template</strong> sheet → <strong>Extensions → Apps Script</strong>.<br>
-            2. If you already have the auto-sort script there, just paste this <em>underneath</em> it in the same file. Otherwise paste it in on its own.<br>
-            3. Click <strong>Deploy → New deployment</strong> → type: <strong>Web app</strong> → Execute as: <strong>Me</strong> → Who has access: <strong>Anyone</strong> → <strong>Deploy</strong>. Authorise when prompted.<br>
-            4. Copy the <strong>Web app URL</strong> it gives you and paste it into the field below.
-          </p>
-          <textarea id="appsScriptCode" readonly style="min-height:220px;"></textarea>
-          <div class="row" style="margin-top:10px;">
-            <button class="secondary" id="copyScriptBtn">Copy this script</button>
-          </div>
-          <div class="row" style="margin-top:16px;">
-            <div class="field" style="flex:1;min-width:280px;">
-              <label>Web app URL</label>
-              <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/XXXX/exec">
-            </div>
-          </div>
-          <p class="muted">Note: because of a browser security quirk with Apps Script Web Apps, this tool can't read back a confirmation — after sending, just glance at the sheet to confirm the rows landed.</p>
-        </div>
-      </details>
+      <p class="hint">We've guessed a category for each line from the description, and tagged each row with its Bank / Platform. Untick anything you don't want copied (transfers between your own accounts, credit card payments, etc.), fix any category or platform label, then copy each block into the matching tab — paste into the first empty row under the existing headers.</p>
 
       <div class="section-label"><span class="badge income">INCOME</span> rows → paste into the <strong>Income</strong> tab <span class="count-pill" id="incomeCount">0 rows</span></div>
       <div class="toolbar">
         <button id="copyIncomeBtn">Copy Income rows</button>
-        <button id="sendIncomeBtn" class="secondary">Send Income rows to Sheet</button>
         <span class="muted">Amount total: <strong id="incomeTotal">R0.00</strong></span>
       </div>
       <div class="table-scroll"><table id="incomeTable"></table></div>
@@ -342,7 +308,6 @@
       <div class="section-label" style="margin-top:32px;"><span class="badge expense">EXPENSES</span> rows → paste into the <strong>Expenses</strong> tab <span class="count-pill" id="expenseCount">0 rows</span></div>
       <div class="toolbar">
         <button id="copyExpenseBtn">Copy Expense rows</button>
-        <button id="sendExpenseBtn" class="secondary">Send Expense rows to Sheet</button>
         <span class="muted">Amount total: <strong id="expenseTotal">R0.00</strong></span>
       </div>
       <div class="table-scroll"><table id="expenseTable"></table></div>
@@ -881,147 +846,6 @@ $("copyExpenseBtn").addEventListener("click", ()=>{
   );
   if(lines.length===0){ showToast("No expense rows ticked to copy"); return; }
   copyToClipboard(lines.join("\n"), expenseRows.filter(r=>r.include).length + " expense rows");
-});
-
-// ---------- Send to Google Sheet ----------
-const APPS_SCRIPT_CODE = `function doPost(e) {
-  try {
-    var body;
-    if (e.parameter && e.parameter.rows) {
-      // Submitted as a classic HTML form — works from any page, including local files
-      body = {
-        sheet: e.parameter.sheet,
-        rows: JSON.parse(e.parameter.rows)
-      };
-    } else {
-      // Submitted via fetch() as a raw JSON body
-      body = JSON.parse(e.postData.contents);
-    }
-    var sheetName = body.sheet;   // "Income" or "Expenses"
-    var rows = body.rows;         // array of arrays, in column order
-    var startRow = 5;             // first data row in both tabs
-
-    console.log("doPost received sheet=" + sheetName + " rowCount=" + (rows ? rows.length : "undefined"));
-
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet) {
-      console.log("ERROR: sheet not found. Available sheets: " + ss.getSheets().map(function(s){return s.getName();}).join(", "));
-      return ContentService.createTextOutput(JSON.stringify({ok:false, error:"Sheet not found: " + sheetName}))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    if (rows.length > 0) {
-      var lastRow = sheet.getLastRow();
-      var targetRow = Math.max(startRow, lastRow + 1);
-      var numCols = rows[0].length;
-      console.log("Writing " + rows.length + " rows to '" + sheetName + "' starting at row " + targetRow);
-      sheet.getRange(targetRow, 1, rows.length, numCols).setValues(rows);
-
-      // Re-sort by date (column A), since script-driven edits don't trigger onEdit
-      var finalLastRow = sheet.getLastRow();
-      if (finalLastRow >= startRow) {
-        sheet.getRange(startRow, 1, finalLastRow - startRow + 1, sheet.getLastColumn())
-             .sort({column: 1, ascending: true});
-      }
-    } else {
-      console.log("No rows in payload — nothing written.");
-    }
-    return ContentService.createTextOutput(JSON.stringify({ok:true, added: rows.length}))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    console.log("EXCEPTION: " + err.message);
-    return ContentService.createTextOutput(JSON.stringify({ok:false, error: err.message}))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-$("appsScriptCode").value = APPS_SCRIPT_CODE;
-
-$("copyScriptBtn").addEventListener("click", ()=>{
-  copyToClipboard(APPS_SCRIPT_CODE, "Apps Script code");
-});
-
-// Best-effort persistence of the Web App URL (works when opened inside Claude; harmless no-op otherwise)
-async function loadSavedUrl(){
-  try{
-    if(window.storage){
-      const res = await window.storage.get("heroEnergyWebAppUrl");
-      if(res && res.value) $("webAppUrl").value = res.value;
-    }
-  }catch(e){ /* not available in this environment — ignore */ }
-}
-loadSavedUrl();
-
-$("webAppUrl").addEventListener("change", async ()=>{
-  try{
-    if(window.storage) await window.storage.set("heroEnergyWebAppUrl", $("webAppUrl").value.trim());
-  }catch(e){ /* ignore if unsupported */ }
-});
-
-function sendRowsToSheet(sheetName, rowsArray, btn){
-  const url = $("webAppUrl").value.trim();
-  if(!url){
-    showToast("Paste your Web App URL into the setup box first");
-    return;
-  }
-  if(rowsArray.length === 0){
-    showToast("No " + sheetName.toLowerCase() + " rows ticked to send");
-    return;
-  }
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Sending…";
-
-  // Submit via a hidden form + iframe rather than fetch(). Form submissions aren't
-  // subject to the CORS/mixed-content restrictions fetch runs into — especially when
-  // this tool is opened as a local file:// page — so this works far more reliably.
-  let iframe = document.getElementById("hiddenPostFrame");
-  if(!iframe){
-    iframe = document.createElement("iframe");
-    iframe.id = "hiddenPostFrame";
-    iframe.name = "hiddenPostFrame";
-    iframe.style.display = "none";
-    document.body.appendChild(iframe);
-  }
-
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = url;
-  form.target = "hiddenPostFrame";
-  form.style.display = "none";
-
-  const sheetInput = document.createElement("input");
-  sheetInput.name = "sheet";
-  sheetInput.value = sheetName;
-  form.appendChild(sheetInput);
-
-  const rowsInput = document.createElement("input");
-  rowsInput.name = "rows";
-  rowsInput.value = JSON.stringify(rowsArray);
-  form.appendChild(rowsInput);
-
-  document.body.appendChild(form);
-  form.submit();
-  setTimeout(()=>{ document.body.removeChild(form); }, 500);
-
-  showToast(rowsArray.length + " " + sheetName.toLowerCase() + " rows sent — check your sheet to confirm");
-  setTimeout(()=>{
-    btn.disabled = false;
-    btn.textContent = originalText;
-  }, 800);
-}
-
-$("sendIncomeBtn").addEventListener("click", ()=>{
-  const rows = incomeRows.filter(r=>r.include).map(r=>
-    [r.date, r.desc, r.category, r.amount, r.receivedInto, r.bank, r.reference, r.notes]
-  );
-  sendRowsToSheet("Income", rows, $("sendIncomeBtn"));
-});
-
-$("sendExpenseBtn").addEventListener("click", ()=>{
-  const rows = expenseRows.filter(r=>r.include).map(r=>
-    [r.date, r.desc, r.category, r.amount, r.paidFrom, r.bank, r.supplier, r.reference, r.notes]
-  );
-  sendRowsToSheet("Expenses", rows, $("sendExpenseBtn"));
 });
 
 $("startOverBtn").addEventListener("click", ()=>{
